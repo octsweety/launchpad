@@ -63,18 +63,14 @@ contract Locker is Ownable {
         (uint bal,,,) = balanceOf(msg.sender, _token);
         uint256 amount;
         uint256 length = tokenLocks.length;
-        if (tokenLocks[length-1].unlockTime <= block.timestamp) {
-            amount = bal;
-            delete locks[msg.sender][_token];
-        } else {
-            for (uint i = 0; i < length; i++) {
-                if (tokenLocks[i].unlockTime > block.timestamp) break;
-                amount = amount.add(tokenLocks[i].amount);
-                delete tokenLocks[i];
-            }
+        for (uint i = 0; i < length; i++) {
+            if (tokenLocks[i].unlockTime > block.timestamp) continue;
+            amount = amount.add(tokenLocks[i].amount);
+            delete tokenLocks[i];
         }
 
-        IERC20(_token).safeTransfer(msg.sender, amount);
+        if (amount > 0) IERC20(_token).safeTransfer(msg.sender, amount);
+        else require(false, "!unlocked");
     }
 
     function emergencyWithdraw(address _token, uint _amount) external onlyOwner {

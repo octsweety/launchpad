@@ -38,7 +38,7 @@ contract StakePool is ReentrancyGuard, Ownable, Pausable {
     mapping(uint256 => mapping(address => LockedBalance[])) userLocks;
     mapping(uint256 => EnumerableSet.AddressSet) users;
 
-    address public feeRecipient = address(0x000000000000000000000000000000000000dEaD);
+    address public feeRecipient;
 
     event Staked(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdrawn(address indexed user, uint256 indexed pid, uint256 amount);
@@ -51,6 +51,7 @@ contract StakePool is ReentrancyGuard, Ownable, Pausable {
 
     constructor(address _stakingToken) {
         stakingToken = IERC20(_stakingToken);
+        feeRecipient = msg.sender;
         
         // Add Tiers
         addTier(uint(20000 ether), 750, uint(3 days));

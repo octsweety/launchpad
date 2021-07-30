@@ -18,6 +18,12 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
 
+    struct Tier {
+        uint supply;
+        uint available;
+        uint allocation;
+    }
+
     address WBNB = address(0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c);
     IUniswapV2Router02 uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
     address public liquidityLocker;
@@ -39,6 +45,9 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
     uint public txFee;
     uint public presaleFee = 500; // 5%
     uint public constant MAX_FEE = 10000;
+
+    uint public totalAllocation;
+    Tier[] public tiers;
 
     uint public totalInvest;
     mapping(address => uint) invested;
@@ -124,15 +133,14 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
     }
 
     function totalInvestable(address _investor) public view returns (uint) {
-        uint totalAllocPoint = stakePool.totalAllocPoint();
-        uint tierCount = stakePool.tierCount();
+        uint tierCount = tiers.length;
         uint totalInvestable = 0;
 
         for (uint i = 0; i < tierCount; i++) {
-            (,uint allocPoint,,uint tierSupply) = stakePool.poolInfo(i);
-            uint tierTotalAvailable = stakePool.totalAvailable(i);
+            uint allocPoint = tiers[i].allocation;
+            uint tierTotalAvailable = tiers[i].available;
             (,uint balance,) = stakePool.balanceOf(i, _investor);
-            totalInvestable += hardCap.mul(allocPoint).div(totalAllocPoint).mul(balance).div(tierTotalAvailable);
+            totalInvestable += hardCap.mul(allocPoint).div(totalAllocation).mul(balance).div(tierTotalAvailable);
         }
 
         return totalInvestable;
@@ -290,6 +298,18 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
 
             wantToken.safeTransfer(investor, amount);
             claimed[investor] = block.timestamp;
+        }
+    }
+
+    function updateTiers() external whiteListed whenNotStarted {
+        delete tiers;
+        totalAllocation = stakePool.totalAllocPoint();
+
+        uint tierCount = stakePool.tierCount();
+        for (uint i = 0; i < tierCount; i++) {
+            (,uint allocPoint,,uint tierSupply) = stakePool.poolInfo(i);
+            uint tierTotalAvailable = stakePool.totalAvailable(i);
+            tiers.push(Tier({supply: tierSupply, available: tierTotalAvailable, allocation: allocPoint}));
         }
     }
 
