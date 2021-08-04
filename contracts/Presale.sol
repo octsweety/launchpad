@@ -13,6 +13,10 @@ import "@openzeppelin/contracts/utils/EnumerableSet.sol";
 import "./interface/IStakePool.sol";
 import "./interface/IUniswapV2Router02.sol";
 
+interface ILocker {
+    function lock(address _token, uint _amount, address _keeper, uint _duration) external;
+}
+
 contract Presale is ReentrancyGuard, Ownable, Pausable {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -50,15 +54,16 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
     Tier[] public tiers;
 
     uint public totalInvest;
-    mapping(address => uint) invested;
+    mapping(address => uint) public invested;
     EnumerableSet.AddressSet investors;
-    mapping(address => uint) claimed;
+    mapping(address => uint) public claimed;
 
     bool public enabledClaim = false;
     bool public addedLiquidity = false;
     uint public liquidityAlloc;
     uint public liquidityLockDuration;
     address public uniswapV2Pair;
+    uint public suppliedLP;
 
     modifier whenNotStarted {
         require(block.timestamp < startTime, "already started");
@@ -132,6 +137,13 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         return investorList;
     }
 
+    function requiredWantAmount() external view returns (uint) {
+        uint liquidityForInvest = totalInvest.mul(liquidityAlloc).div(MAX_FEE);
+        uint decimalsDiff = 18-ERC20(address(wantToken)).decimals();
+        uint liquidityForWant = liquidityForInvest.mul(1e18).div(price).div(10**decimalsDiff);
+        return liquidityForWant;
+    }
+
     function totalInvestable(address _investor) public view returns (uint) {
         uint tierCount = tiers.length;
         uint totalInvestable = 0;
@@ -139,6 +151,7 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         for (uint i = 0; i < tierCount; i++) {
             uint allocPoint = tiers[i].allocation;
             uint tierTotalAvailable = tiers[i].available;
+            if (tierTotalAvailable == 0) continue;
             (,uint balance,) = stakePool.balanceOf(i, _investor);
             totalInvestable += hardCap.mul(allocPoint).div(totalAllocation).mul(balance).div(tierTotalAvailable);
         }
@@ -182,6 +195,8 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
 
         invested[msg.sender] += msg.value;
         totalInvest += msg.value;
+
+        if (!investors.contains(msg.sender)) investors.add(msg.sender);
     }
 
     function claim() external whenFinished nonReentrant {
@@ -189,7 +204,7 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         require(claimed[msg.sender] == 0, "already claimed");
 
         uint amount = claimable(msg.sender);
-        require(amount >= wantToken.balanceOf(address(this)), "exceeded amount to claim");
+        require(amount <= wantToken.balanceOf(address(this)), "exceeded amount to claim");
 
         wantToken.safeTransfer(msg.sender, amount);
         claimed[msg.sender] = block.timestamp;
@@ -207,7 +222,10 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
 
     function withdrawWantToken() external onlyKeeper whenFinished {
         uint investorOwned = totalSupply.mul(totalInvest).div(hardCap);
-        wantToken.safeTransfer(msg.sender, totalSupply.sub(investorOwned));
+        uint toSend = totalSupply.sub(investorOwned);
+        uint curBal = wantToken.balanceOf(address(this));
+        if (toSend > curBal) toSend = curBal;
+        wantToken.safeTransfer(msg.sender, toSend);
     }
 
     function withdrawInvestToken() external onlyKeeper whenFinished {
@@ -230,7 +248,9 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         }
     }
 
-    function addLiquidity() external whiteListed whenFinished {
+    function addLiquidity(bool _force, uint _amount) external whiteListed whenFinished {
+        require(_force == true || totalInvest > softCap, "!failed presale");
+
         if (IUniswapV2Factory(uniswapV2Router.factory()).getPair(address(wantToken), uniswapV2Router.WETH()) == address(0)) {
             uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory())
                 .createPair(address(wantToken), uniswapV2Router.WETH());
@@ -238,7 +258,10 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
 
         uint liquidityForInvest = totalInvest.mul(liquidityAlloc).div(MAX_FEE);
         uint decimalsDiff = 18-ERC20(address(wantToken)).decimals();
-        uint liquidityForWant = liquidityForInvest.div(price).div(10**decimalsDiff);
+        uint liquidityForWant = liquidityForInvest.mul(1e18).div(price).div(10**decimalsDiff);
+
+        require(_amount >= liquidityForWant, "!required amount");
+        wantToken.safeTransferFrom(msg.sender, address(this), liquidityForWant);
 
         if (address(investToken) == WBNB) {
             _addLiquidity(liquidityForWant, liquidityForInvest);
@@ -246,9 +269,9 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
             _swapAndLiquidate(liquidityForWant, liquidityForInvest);
         }
 
-        uint lpBalance = IERC20(uniswapV2Pair).balanceOf(address(this));
-        IERC20(uniswapV2Pair).safeApprove(liquidityLocker, lpBalance);
-        // liquidityLocker.lock(uniswapV2Pair, lpBalance, keeper, liquidityLockDuration);
+        suppliedLP = IERC20(uniswapV2Pair).balanceOf(address(this));
+        IERC20(uniswapV2Pair).safeApprove(liquidityLocker, suppliedLP);
+        ILocker(liquidityLocker).lock(uniswapV2Pair, suppliedLP, keeper, liquidityLockDuration);
 
         addedLiquidity = true;
     }
@@ -279,7 +302,7 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
 
         // add the liquidity
         uniswapV2Router.addLiquidityETH{value: bnbAmount}(
-            address(this),
+            address(wantToken),
             tokenAmount,
             0, // slippage is unavoidable
             0, // slippage is unavoidable
@@ -288,13 +311,13 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         );
     }
 
-    function _bulkTransferClaimed() internal {
+    function _bulkTransferClaimable() internal {
         for (uint i = 0; i < investors.length(); i++) {
             address investor = investors.at(i);
             if (claimed[investor] > 0) continue; // already claimed
 
             uint amount = claimable(investor);
-            require(amount >= wantToken.balanceOf(address(this)), "exceeded amount to claim");
+            require(amount <= wantToken.balanceOf(address(this)), "exceeded amount to claim");
 
             wantToken.safeTransfer(investor, amount);
             claimed[investor] = block.timestamp;
@@ -313,11 +336,11 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         }
     }
 
-    function setEnableClaim(bool _flag, bool _isBulk) external whiteListed {
+    function setEnableClaim(bool _flag, bool _isBulk) external whiteListed whenFinished {
         enabledClaim = _flag;
 
         if (_flag == true && _isBulk == true) {
-            _bulkTransferClaimed();
+            _bulkTransferClaimable();
         }
     }
 
@@ -372,7 +395,17 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         liquidityLockDuration = _duration;
     }
 
+    function setStartTime(uint _startTime, uint _duration) external whiteListed {
+        startTime = _startTime;
+        endTime = _startTime.add(_duration);
+    }
+
     function setWhiteList(address _user, bool _flag) external onlyOwner {
         whiteList[_user] = _flag;
+    }
+
+    // Temp Function
+    function getTimestamp() external view returns (uint) {
+        return block.timestamp;
     }
 }

@@ -259,10 +259,10 @@ contract StakePool is ReentrancyGuard, Ownable, Pausable {
         _unpause();
     }
 
-    function emergencyWithdraw(address _token, uint256 _amount) external onlyOwner {
-        uint256 _bal = IERC20(_token).balanceOf(address(this));
-        if (_amount > _bal) _amount = _bal;
+    // function emergencyWithdraw(address _token, uint256 _amount) external onlyOwner {
+    //     uint256 _bal = IERC20(_token).balanceOf(address(this));
+    //     if (_amount > _bal) _amount = _bal;
 
-        IERC20(_token).safeTransfer(_msgSender(), _amount);
-    }
+    //     IERC20(_token).safeTransfer(_msgSender(), _amount);
+    // }
 }
