@@ -257,8 +257,15 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         }
 
         uint liquidityForInvest = totalInvest.mul(liquidityAlloc).div(MAX_FEE);
-        uint decimalsDiff = 18-ERC20(address(wantToken)).decimals();
-        uint liquidityForWant = liquidityForInvest.mul(1e18).div(price).div(10**decimalsDiff);
+        uint wantDecimals = ERC20(address(wantToken)).decimals();
+        uint investDecimals = address(investToken) == WBNB ? 18 : ERC20(address(investToken)).decimals();
+        uint decimalsDiff = investDecimals > wantDecimals ? investDecimals.sub(wantDecimals) : wantDecimals.sub(investDecimals);
+        uint liquidityForWant;
+        if (investDecimals > wantDecimals) {
+            liquidityForWant = liquidityForInvest.mul(1e18).div(price).div(10**decimalsDiff);
+        } else {
+            liquidityForWant = liquidityForInvest.mul(1e18).div(price).mul(10**decimalsDiff);
+        }
 
         require(_amount >= liquidityForWant, "!required amount");
         wantToken.safeTransferFrom(msg.sender, address(this), liquidityForWant);

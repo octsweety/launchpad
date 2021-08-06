@@ -35,6 +35,7 @@ describe('Testing StakePool...', () => {
     let locker: Locker;
     let presaleToken: MocERC20;
     let idoToken: MocERC20;
+    let investToken: MocERC20;
     let curBlock;
     let curTimestamp;
     let lpSupply;
@@ -58,6 +59,9 @@ describe('Testing StakePool...', () => {
 
         idoToken = await erc20Factory.deploy();
         console.log("LaunchpadToken address => ", idoToken.address);
+
+        investToken = await erc20Factory.deploy();
+        console.log("InvestToken address => ", investToken.address);
 
         const poolFactory = new StakePool__factory(deployer);
         pool = await poolFactory.deploy(idoToken.address);
@@ -83,6 +87,7 @@ describe('Testing StakePool...', () => {
         );
         console.log("Presale address => ", presale.address);
 
+        await presale.setInvestToken(investToken.address);
         await presale.setUniswapRouter(address.testnet.uniswapRouter);
     });
 
@@ -109,6 +114,13 @@ describe('Testing StakePool...', () => {
         await idoToken.approve(pool.address, parseEther('99999999999999'));
         await idoToken.connect(account1).approve(pool.address, parseEther('99999999999999'));
         await idoToken.connect(account2).approve(pool.address, parseEther('99999999999999'));
+
+        await investToken.transfer(account1.address, parseEther('200000'));
+        await investToken.transfer(account2.address, parseEther('200000'));
+
+        await investToken.approve(presale.address, parseEther('99999999999999'));
+        await investToken.connect(account1).approve(presale.address, parseEther('99999999999999'));
+        await investToken.connect(account2).approve(presale.address, parseEther('99999999999999'));
     });
 
     it('Stake', async () => {
@@ -171,7 +183,8 @@ describe('Testing StakePool...', () => {
 
         let investable = await presale.investable(account1.address);
         console.log(`beforeInvest => totalInvestable: ${toEther(totalInvestable)}, investable: ${toEther(investable)}`);
-        await presale.connect(account1).invest({value: parseEther('500')});
+
+        await presale.connect(account1).investWithToken(parseEther('500'));
 
         investable = await presale.investable(account1.address);
         const invested = await presale.invested(account1.address);
@@ -183,11 +196,11 @@ describe('Testing StakePool...', () => {
     it('Invest from account2', async () => {
         const totalInvestable = await presale.totalInvestable(account2.address);
         try {
-            await presale.connect(account2).invest({value: totalInvestable.add(1)});    
+            await presale.connect(account2).investWithToken(totalInvestable.add(1));    
         } catch (error) {
             console.log("Check limited invest (OK)");
         }
-        await presale.connect(account2).invest({value: totalInvestable});
+        await presale.connect(account2).investWithToken(totalInvestable);
 
         const totalInvested = await presale.totalInvest();
         console.log("Total Invested: ", toEther(totalInvested));
@@ -202,7 +215,7 @@ describe('Testing StakePool...', () => {
             console.log("Check soft cap (OK)");
         }
         const investable = await presale.investable(account1.address);
-        await presale.connect(account1).invest({value: investable});
+        await presale.connect(account1).investWithToken(investable);
 
         const totalInvested = await presale.totalInvest();
         console.log("Total Invested: ", toEther(totalInvested));
