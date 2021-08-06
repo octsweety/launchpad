@@ -25,7 +25,7 @@ const toEther = (val, unit = 18) => {
     return ethers.utils.formatUnits(val, unit);
 }
 
-describe('Testing StakePool...', () => {
+describe('Testing Presale with BNB...', () => {
     let deployer;
     let account1;
     let account2;
@@ -51,12 +51,12 @@ describe('Testing StakePool...', () => {
         console.log("Deployer before balance => ", toEther(beforeBalance));
         
         const erc20Factory = new MocERC20__factory(deployer);
-        presaleToken = await erc20Factory.deploy();
+        presaleToken = await erc20Factory.deploy("Presale Token", "PRETOKEN", 18);
         console.log("PresaleToken address => ", presaleToken.address);
         curBlock = await presaleToken.getBlock();
         curTimestamp = await presaleToken.getTimestamp();
 
-        idoToken = await erc20Factory.deploy();
+        idoToken = await erc20Factory.deploy("Launchpad Token", "IDOTOKEN", 18);
         console.log("LaunchpadToken address => ", idoToken.address);
 
         const poolFactory = new StakePool__factory(deployer);
@@ -70,6 +70,7 @@ describe('Testing StakePool...', () => {
         const presaleFactory = new Presale__factory(deployer);
         presale = await presaleFactory.deploy(
             presaleToken.address,
+            address.mainnet.bnb,
             curTimestamp+5,                 // Just start
             10,                             // 10 sec duration
             parseEther('5000'),             // 5kBNB hardCap
@@ -279,7 +280,9 @@ describe('Testing StakePool...', () => {
             await locker.connect(account2).unlock(lpToken.address);
         } catch (error) {
             console.log("Check unlock LP (OK)");
+            return;
         }
+        throw new Error("Check unlock LP (FAIL)");
     });
 
     it('List investors', async () => {
@@ -336,7 +339,7 @@ describe('Testing StakePool...', () => {
 
         const expectBal = beforeBal.add(totalInvest.sub(totalInvest.mul(liquidityAlloc).div(10000)).sub(totalInvest.mul(presaleFee).div(10000)));
         const curBal = await deployer.getBalance();
-        expect(curBal.div(parseEther('0.01'))).eq(expectBal.div(parseEther('0.01')));
+        expect(curBal.div(parseEther('0.1'))).eq(expectBal.div(parseEther('0.1')));
     });
 
     it('Withdraw presale fee', async () => {
@@ -348,6 +351,6 @@ describe('Testing StakePool...', () => {
 
         const expectBal = beforeBal.add(totalInvest.mul(presaleFee).div(10000));
         const curBal = await deployer.getBalance();
-        expect(curBal.div(parseEther('0.01'))).eq(expectBal.div(parseEther('0.01')));
+        expect(curBal.div(parseEther('0.1'))).eq(expectBal.div(parseEther('0.1')));
     });
 });

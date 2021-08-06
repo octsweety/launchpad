@@ -42,9 +42,9 @@ describe('Testing Locker...', () => {
         console.log("Deployer before balance => ", toEther(beforeBalance));
         
         const erc20Factory = new MocERC20__factory(deployer);
-        token1 = await erc20Factory.deploy();
-        token2 = await erc20Factory.deploy();
-        token3 = await erc20Factory.deploy();
+        token1 = await erc20Factory.deploy("Lock Token1", "TOKEN1",18);
+        token2 = await erc20Factory.deploy("Lock Token2", "TOKEN2",18);
+        token3 = await erc20Factory.deploy("Lock Token3", "TOKEN3",18);
 
         const poolFactory = new Locker__factory(deployer);
         pool = await poolFactory.deploy();

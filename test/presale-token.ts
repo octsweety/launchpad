@@ -25,7 +25,7 @@ const toEther = (val, unit = 18) => {
     return ethers.utils.formatUnits(val, unit);
 }
 
-describe('Testing StakePool...', () => {
+describe('Testing Presale with Token...', () => {
     let deployer;
     let account1;
     let account2;
@@ -39,6 +39,8 @@ describe('Testing StakePool...', () => {
     let curBlock;
     let curTimestamp;
     let lpSupply;
+    const presaleDecimals = 9;
+    const investDecimals = 18;
 
 
     before(async () => {
@@ -52,15 +54,15 @@ describe('Testing StakePool...', () => {
         console.log("Deployer before balance => ", toEther(beforeBalance));
         
         const erc20Factory = new MocERC20__factory(deployer);
-        presaleToken = await erc20Factory.deploy();
+        presaleToken = await erc20Factory.deploy("Presale Token", "PRETOKEN", presaleDecimals);
         console.log("PresaleToken address => ", presaleToken.address);
         curBlock = await presaleToken.getBlock();
         curTimestamp = await presaleToken.getTimestamp();
 
-        idoToken = await erc20Factory.deploy();
+        idoToken = await erc20Factory.deploy("Launchpad Token", "IDOTOKEN",18);
         console.log("LaunchpadToken address => ", idoToken.address);
 
-        investToken = await erc20Factory.deploy();
+        investToken = await erc20Factory.deploy("Invest Token", "INVTOKEN", investDecimals);
         console.log("InvestToken address => ", investToken.address);
 
         const poolFactory = new StakePool__factory(deployer);
@@ -74,20 +76,20 @@ describe('Testing StakePool...', () => {
         const presaleFactory = new Presale__factory(deployer);
         presale = await presaleFactory.deploy(
             presaleToken.address,
+            investToken.address,
             curTimestamp+5,                 // Just start
             10,                             // 10 sec duration
-            parseEther('5000'),             // 5kBNB hardCap
-            parseEther('3000'),             // 3k softCap
+            parseEther('5000', investDecimals),             // 5kBNB hardCap
+            parseEther('3000', investDecimals),             // 3k softCap
             parseEther('0.1'),              // 0.1BNB listingPrice
             5000,                           // 50% liquidity
             locker.address,
-            300,                            // 5 mins locking
+            0,                            // 0 mins locking
             pool.address,
             account2.address                // Keeper
         );
         console.log("Presale address => ", presale.address);
 
-        await presale.setInvestToken(investToken.address);
         await presale.setUniswapRouter(address.testnet.uniswapRouter);
     });
 
@@ -101,12 +103,12 @@ describe('Testing StakePool...', () => {
     });
 
     it('Distribute 200k assets to each accounts', async () => {
-        await presaleToken.transfer(account1.address, parseEther('200000'));
-        await presaleToken.transfer(account2.address, parseEther('200000'));
+        await presaleToken.transfer(account1.address, parseEther('200000', presaleDecimals));
+        await presaleToken.transfer(account2.address, parseEther('200000', presaleDecimals));
 
-        await presaleToken.approve(presale.address, parseEther('99999999999999'));
-        await presaleToken.connect(account1).approve(presale.address, parseEther('99999999999999'));
-        await presaleToken.connect(account2).approve(presale.address, parseEther('99999999999999'));
+        await presaleToken.approve(presale.address, parseEther('99999999999999', presaleDecimals));
+        await presaleToken.connect(account1).approve(presale.address, parseEther('99999999999999', presaleDecimals));
+        await presaleToken.connect(account2).approve(presale.address, parseEther('99999999999999', presaleDecimals));
 
         await idoToken.transfer(account1.address, parseEther('200000'));
         await idoToken.transfer(account2.address, parseEther('200000'));
@@ -115,12 +117,12 @@ describe('Testing StakePool...', () => {
         await idoToken.connect(account1).approve(pool.address, parseEther('99999999999999'));
         await idoToken.connect(account2).approve(pool.address, parseEther('99999999999999'));
 
-        await investToken.transfer(account1.address, parseEther('200000'));
-        await investToken.transfer(account2.address, parseEther('200000'));
+        await investToken.transfer(account1.address, parseEther('200000', investDecimals));
+        await investToken.transfer(account2.address, parseEther('200000', investDecimals));
 
-        await investToken.approve(presale.address, parseEther('99999999999999'));
-        await investToken.connect(account1).approve(presale.address, parseEther('99999999999999'));
-        await investToken.connect(account2).approve(presale.address, parseEther('99999999999999'));
+        await investToken.approve(presale.address, parseEther('99999999999999', investDecimals));
+        await investToken.connect(account1).approve(presale.address, parseEther('99999999999999', investDecimals));
+        await investToken.connect(account2).approve(presale.address, parseEther('99999999999999', investDecimals));
     });
 
     it('Stake', async () => {
@@ -145,13 +147,14 @@ describe('Testing StakePool...', () => {
     it('Supply 2 times', async () => {
         const totalSupply = await presale.totalSupply();
 
-        await presale.deposit(parseEther('50000'));
+        await presale.deposit(parseEther('50000', presaleDecimals));
 
-        expect(await presale.totalSupply()).eq(totalSupply.add(parseEther('50000')));
+        expect(await presale.totalSupply()).eq(totalSupply.add(parseEther('50000', presaleDecimals)));
 
-        await presale.deposit(parseEther('50000'));
+        await presale.deposit(parseEther('50000', presaleDecimals));
 
-        expect(await presale.totalSupply()).eq(totalSupply.add(parseEther('100000')));
+        expect(await presale.totalSupply()).eq(totalSupply.add(parseEther('100000', presaleDecimals)));
+        console.log("Total Supply: ", toEther(await presale.totalSupply(), presaleDecimals));
     });
 
     it('Invest from account1', async () => {
@@ -175,22 +178,22 @@ describe('Testing StakePool...', () => {
         const balance0 = (await pool.balanceOf(0, account1.address)).unlocked;
         const balance1 = (await pool.balanceOf(1, account1.address)).unlocked;
         const calcInvestable = cap0.mul(balance0).div(available0).add(cap1.mul(balance1).div(available1));
-        console.log(`alloc0Cap: ${toEther(cap0)}, alloc1Cap: ${toEther(cap1)}, alloc4Cap: ${toEther(cap4)}`);
-        console.log("Calculated Investable: ", toEther(calcInvestable));
+        console.log(`alloc0Cap: ${toEther(cap0, investDecimals)}, alloc1Cap: ${toEther(cap1, investDecimals)}, alloc4Cap: ${toEther(cap4, investDecimals)}`);
+        console.log("Calculated Investable: ", toEther(calcInvestable, investDecimals));
         
         const totalInvestable = await presale.totalInvestable(account1.address);
         expect(calcInvestable).eq(totalInvestable);
 
         let investable = await presale.investable(account1.address);
-        console.log(`beforeInvest => totalInvestable: ${toEther(totalInvestable)}, investable: ${toEther(investable)}`);
+        console.log(`beforeInvest => totalInvestable: ${toEther(totalInvestable, investDecimals)}, investable: ${toEther(investable, investDecimals)}`);
 
-        await presale.connect(account1).investWithToken(parseEther('500'));
+        await presale.connect(account1).investWithToken(parseEther('500', investDecimals));
 
         investable = await presale.investable(account1.address);
         const invested = await presale.invested(account1.address);
-        console.log(`afterInvest => totalInvestable: ${toEther(totalInvestable)}, investable: ${toEther(investable)}, invested: ${toEther(invested)}`);
-        expect(investable).eq(totalInvestable.sub(parseEther('500')));
-        expect(invested).eq(parseEther('500'));
+        console.log(`afterInvest => totalInvestable: ${toEther(totalInvestable, investDecimals)}, investable: ${toEther(investable, investDecimals)}, invested: ${toEther(invested, investDecimals)}`);
+        expect(investable).eq(totalInvestable.sub(parseEther('500', investDecimals)));
+        expect(invested).eq(parseEther('500', investDecimals));
     });
 
     it('Invest from account2', async () => {
@@ -200,12 +203,13 @@ describe('Testing StakePool...', () => {
         } catch (error) {
             console.log("Check limited invest (OK)");
         }
+        console.log(toEther(totalInvestable, investDecimals));
         await presale.connect(account2).investWithToken(totalInvestable);
 
         const totalInvested = await presale.totalInvest();
-        console.log("Total Invested: ", toEther(totalInvested));
+        console.log("Total Invested: ", toEther(totalInvested, investDecimals));
         
-        expect(totalInvested).eq(parseEther('500').add(totalInvestable));
+        expect(totalInvested).eq(parseEther('500', investDecimals).add(totalInvestable));
     });
 
     it('Check softCap and invest from account1 again', async () => {
@@ -218,7 +222,7 @@ describe('Testing StakePool...', () => {
         await presale.connect(account1).investWithToken(investable);
 
         const totalInvested = await presale.totalInvest();
-        console.log("Total Invested: ", toEther(totalInvested));
+        console.log("Total Invested: ", toEther(totalInvested, investDecimals));
     });
 
     it('Check limited operations before finishing presale', async () => {
@@ -253,6 +257,23 @@ describe('Testing StakePool...', () => {
         }
     });
 
+    it('Add Liquidity of invest token', async () => {
+        const investBal = await investToken.balanceOf(deployer.address);
+        const bnbBal = await deployer.getBalance();
+
+        await presale.addLiquidityDirectly(investToken.address, parseEther('100000', investDecimals), {value: parseEther('5000')});
+
+        expect(await investToken.balanceOf(deployer.address)).eq(investBal.sub(parseEther('100000', investDecimals)));
+        const curBal = await deployer.getBalance();
+        const expectBal = bnbBal.sub(parseEther('5000'));
+        expect(curBal.div(parseEther('1'))).eq(expectBal.div(parseEther('1')));
+
+        const lpInfo = await presale.lpToken(investToken.address);
+        console.log(`investLP: ${lpInfo.addr}, totalSupply: ${toEther(lpInfo.totalSupply)}, curBNB: ${toEther(curBal)}`);
+        expect(lpInfo.addr).to.not.equal("0x0000000000000000000000000000000000000000");
+        expect(lpInfo.totalSupply).gt(0);
+    });
+
     it('Add Liquidity', async () => {
         // Force finish...
         const curTime = await presale.getTimestamp();
@@ -261,10 +282,13 @@ describe('Testing StakePool...', () => {
         const liquidityAlloc = await presale.liquidityAlloc();
         const totalInvested = await presale.totalInvest();
         const listPrice = await presale.price();
-        console.log(`liquidityAlloc: ${liquidityAlloc}, totalInvested: ${toEther(totalInvested)}, price: ${toEther(listPrice)}`);
+        console.log(`liquidityAlloc: ${liquidityAlloc}, totalInvested: ${toEther(totalInvested, investDecimals)}, price: ${toEther(listPrice)}`);
+
+        const bnbValue = await presale.tokenBNBValue(investToken.address, totalInvested.mul(liquidityAlloc).div(10000));
+        console.log('Invest BNB Amount: ', toEther(bnbValue));
 
         const wantAmount = await presale.requiredWantAmount();
-        console.log("Required want token amount: ", toEther(wantAmount));
+        console.log("Required want token amount: ", toEther(wantAmount, presaleDecimals));
 
         try {
             await presale.addLiquidity(false, wantAmount.sub(1));
@@ -276,23 +300,6 @@ describe('Testing StakePool...', () => {
         
         lpSupply = await presale.suppliedLP();
         console.log("Supplied LP: ", toEther(lpSupply));
-    });
-
-    it('Check locked LP', async () => {
-        const mocFactory = new MocERC20__factory(deployer);
-        const lpToken = mocFactory.attach(await presale.uniswapV2Pair());
-        const lpBalance = await lpToken.balanceOf(locker.address);
-        
-        // expect(await lpToken.totalSupply()).eq(lpSupply);
-        expect(lpBalance).eq(lpSupply);
-
-        const balanceOfLocker = await locker.balanceOf(account2.address, lpToken.address);
-        console.log(`total: ${toEther(balanceOfLocker.total)}, locked: ${toEther(balanceOfLocker.locked)}, unlocked: ${toEther(balanceOfLocker.unlocked)}`);
-        try {
-            await locker.connect(account2).unlock(lpToken.address);
-        } catch (error) {
-            console.log("Check unlock LP (OK)");
-        }
     });
 
     it('List investors', async () => {
@@ -313,7 +320,7 @@ describe('Testing StakePool...', () => {
 
         const cliamable = await presale.claimable(account1.address);
         const wantBal = await presaleToken.balanceOf(account1.address);
-        console.log(`Claimable: ${toEther(cliamable)}`);
+        console.log(`Claimable: ${toEther(cliamable, presaleDecimals)}`);
         await presale.connect(account1).claim();
         expect(await presaleToken.balanceOf(account1.address)).eq(wantBal.add(cliamable));
     });
@@ -335,12 +342,12 @@ describe('Testing StakePool...', () => {
         const restBal = totalSupply.mul(hardCap.sub(totalInvest)).div(hardCap);
         await presale.withdrawWantToken();
         const addedBal = (await presaleToken.balanceOf(deployer.address)).sub(wantBal);
-        expect(addedBal).eq(restBal);
+        expect(addedBal.div(10)).eq(restBal.div(10));
         expect(await presaleToken.balanceOf(presale.address)).eq(0);
     });
 
     it('Withdraw invest token', async () => {
-        const beforeBal = await deployer.getBalance();
+        const beforeBal = await investToken.balanceOf(deployer.address);
         const liquidityAlloc = await presale.liquidityAlloc();
         const totalInvest = await presale.totalInvest();
         const presaleFee = await presale.presaleFee();
@@ -348,19 +355,34 @@ describe('Testing StakePool...', () => {
         await presale.withdrawInvestToken();
 
         const expectBal = beforeBal.add(totalInvest.sub(totalInvest.mul(liquidityAlloc).div(10000)).sub(totalInvest.mul(presaleFee).div(10000)));
-        const curBal = await deployer.getBalance();
-        expect(curBal.div(parseEther('0.01'))).eq(expectBal.div(parseEther('0.01')));
+        const curBal = await investToken.balanceOf(deployer.address);
+        expect(curBal).eq(expectBal);
     });
 
     it('Withdraw presale fee', async () => {
-        const beforeBal = await deployer.getBalance();
+        const beforeBal = await investToken.balanceOf(deployer.address);
         const totalInvest = await presale.totalInvest();
         const presaleFee = await presale.presaleFee();
 
         await presale.withdrawPresaleFee();
 
         const expectBal = beforeBal.add(totalInvest.mul(presaleFee).div(10000));
-        const curBal = await deployer.getBalance();
-        expect(curBal.div(parseEther('0.01'))).eq(expectBal.div(parseEther('0.01')));
+        const curBal = await investToken.balanceOf(deployer.address);
+        expect(curBal).eq(expectBal);
+    });
+
+    it('Unlock LP', async () => {
+        const mocFactory = new MocERC20__factory(deployer);
+        const lpToken = mocFactory.attach(await presale.uniswapV2Pair());
+        const lpBalance = await lpToken.balanceOf(locker.address);
+        
+        // expect(await lpToken.totalSupply()).eq(lpSupply);
+        expect(lpBalance).eq(lpSupply);
+
+        const balanceOfLocker = await locker.balanceOf(account2.address, lpToken.address);
+        console.log(`total: ${toEther(balanceOfLocker.total)}, locked: ${toEther(balanceOfLocker.locked)}, unlocked: ${toEther(balanceOfLocker.unlocked)}`);
+        await locker.connect(account2).unlock(lpToken.address);
+
+        expect(await lpToken.balanceOf(locker.address)).eq(lpBalance.sub(balanceOfLocker.total));
     });
 });

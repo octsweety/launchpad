@@ -40,7 +40,7 @@ describe('Testing StakePool...', () => {
         console.log("Deployer before balance => ", toEther(beforeBalance));
         
         const erc20Factory = new MocERC20__factory(deployer);
-        token = await erc20Factory.deploy();
+        token = await erc20Factory.deploy("Launchpad Token", "IDOTOKEN",18);
 
         const poolFactory = new StakePool__factory(deployer);
         pool = await poolFactory.deploy(token.address);

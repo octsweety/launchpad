@@ -12,6 +12,7 @@ import "@openzeppelin/contracts/utils/EnumerableSet.sol";
 
 import "./interface/IStakePool.sol";
 import "./interface/IUniswapV2Router02.sol";
+import "./interface/IUniswapPair.sol";
 
 interface ILocker {
     function lock(address _token, uint _amount, address _keeper, uint _duration) external;
@@ -29,7 +30,7 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
     }
 
     address WBNB = address(0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c);
-    IUniswapV2Router02 uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
+    IUniswapV2Router02 public uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
     address public liquidityLocker;
     mapping(address => bool) whiteList;
     
@@ -44,7 +45,6 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
     uint public price;
     address public immutable keeper;
 
-    uint public decimals = 18;
     uint public investRate = 1;
     uint public txFee;
     uint public presaleFee = 500; // 5%
@@ -97,6 +97,7 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
 
     constructor (
         address _wantToken,
+        address _investToken,
         uint _startTime,
         uint _duration,
         uint _hardCap,
@@ -110,6 +111,7 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
     ) public {
         stakePool = IStakePool(_stakePool);
         wantToken = IERC20(_wantToken);
+        investToken = IERC20(_investToken);
 
         require(_duration > 0, "invalid duration");
         startTime = _startTime;
@@ -139,8 +141,15 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
 
     function requiredWantAmount() external view returns (uint) {
         uint liquidityForInvest = totalInvest.mul(liquidityAlloc).div(MAX_FEE);
-        uint decimalsDiff = 18-ERC20(address(wantToken)).decimals();
-        uint liquidityForWant = liquidityForInvest.mul(1e18).div(price).div(10**decimalsDiff);
+        uint wantDecimals = ERC20(address(wantToken)).decimals();
+        uint investDecimals = address(investToken) == WBNB ? 18 : ERC20(address(investToken)).decimals();
+        uint decimalsDiff = investDecimals > wantDecimals ? investDecimals.sub(wantDecimals) : wantDecimals.sub(investDecimals);
+        uint liquidityForWant;
+        if (investDecimals > wantDecimals) {
+            liquidityForWant = liquidityForInvest.mul(1e18).div(price).div(10**decimalsDiff);
+        } else {
+            liquidityForWant = liquidityForInvest.mul(1e18).div(price).mul(10**decimalsDiff);
+        }
         return liquidityForWant;
     }
 
@@ -186,6 +195,8 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
 
         invested[msg.sender] += amount;
         totalInvest += amount;
+
+        if (!investors.contains(msg.sender)) investors.add(msg.sender);
     }
 
     function invest() external payable onProgress nonReentrant {
@@ -271,9 +282,9 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         wantToken.safeTransferFrom(msg.sender, address(this), liquidityForWant);
 
         if (address(investToken) == WBNB) {
-            _addLiquidity(liquidityForWant, liquidityForInvest);
+            _addLiquidity(address(wantToken), liquidityForWant, liquidityForInvest);
         } else {
-            _swapAndLiquidate(liquidityForWant, liquidityForInvest);
+            _swapAndLiquidity(liquidityForWant, liquidityForInvest);
         }
 
         suppliedLP = IERC20(uniswapV2Pair).balanceOf(address(this));
@@ -283,15 +294,17 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         addedLiquidity = true;
     }
 
-    function _swapAndLiquidate(uint wantTokens, uint investTokens) internal {
+    function _swapAndLiquidity(uint wantTokens, uint investTokens) internal {
         address[] memory path = new address[](2);
-        path[0] = address(wantToken);
+        path[0] = address(investToken);
         path[1] = uniswapV2Router.WETH();
+        // uint beforeBalance = IERC20(uniswapV2Router.WETH()).balanceOf(address(this));
         uint beforeBalance = address(this).balance;
 
         investToken.safeApprove(address(uniswapV2Router), investTokens);
 
         // make the swap
+        // uniswapV2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
         uniswapV2Router.swapExactTokensForETHSupportingFeeOnTransferTokens(
             investTokens,
             0, // accept any amount of ETH
@@ -300,17 +313,63 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
             block.timestamp
         );
 
-        _addLiquidity(wantTokens, address(this).balance.sub(beforeBalance));
+        // _addLiquidityWithWBNB(address(wantToken), wantTokens, IERC20(uniswapV2Router.WETH()).balanceOf(address(this)).sub(beforeBalance));
+        _addLiquidity(address(wantToken), wantTokens, address(this).balance.sub(beforeBalance));
     }
 
-    function _addLiquidity(uint tokenAmount, uint bnbAmount) internal {
+    function addLiquidityDirectly(address _token, uint _amount) external payable {
+        address pair = IUniswapV2Factory(uniswapV2Router.factory()).getPair(_token, uniswapV2Router.WETH());
+        if (pair == address(0)) {
+            pair = IUniswapV2Factory(uniswapV2Router.factory())
+                .createPair(address(_token), uniswapV2Router.WETH());
+        }
+
+        IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
+
+        _addLiquidity(_token, _amount, msg.value);
+
+        uint lpBal = IERC20(pair).balanceOf(address(this));
+        IERC20(pair).safeTransfer(msg.sender, lpBal);
+    }
+
+    function lpToken(address _token) external view returns (address addr, uint totalSupply) {
+        address lp = IUniswapV2Factory(uniswapV2Router.factory()).getPair(_token, uniswapV2Router.WETH());
+        return (lp, IERC20(lp).totalSupply());
+    }
+
+    function tokenBNBValue(address _token, uint _amount) external view returns (uint) {
+        address[] memory path = new address[](2);
+        path[0] = _token;
+        path[1] = uniswapV2Router.WETH();
+        return uniswapV2Router.getAmountsOut(_amount, path)[1];
+    }
+
+    function _addLiquidity(address _token, uint _tokenAmount, uint _bnbAmount) internal {
         // approve token transfer to cover all possible scenarios
-        wantToken.safeApprove(address(uniswapV2Router), tokenAmount);
+        IERC20(_token).safeApprove(address(uniswapV2Router), _tokenAmount);
 
         // add the liquidity
-        uniswapV2Router.addLiquidityETH{value: bnbAmount}(
-            address(wantToken),
-            tokenAmount,
+        uniswapV2Router.addLiquidityETH{value: _bnbAmount}(
+            _token,
+            _tokenAmount,
+            0, // slippage is unavoidable
+            0, // slippage is unavoidable
+            address(this),
+            block.timestamp
+        );
+    }
+
+    function _addLiquidityWithWBNB(address _token, uint _tokenAmount, uint _bnbAmount) internal {
+        // approve token transfer to cover all possible scenarios
+        IERC20(_token).safeApprove(address(uniswapV2Router), _tokenAmount);
+        IERC20(uniswapV2Router.WETH()).safeApprove(address(uniswapV2Router), _bnbAmount);
+
+        // add the liquidity
+        uniswapV2Router.addLiquidity(
+            _token,
+            uniswapV2Router.WETH(),
+            _tokenAmount,
+            _bnbAmount,
             0, // slippage is unavoidable
             0, // slippage is unavoidable
             address(this),
@@ -358,11 +417,6 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
 
     function setInvestToken(address _token) external whiteListed whenNotStarted {
         investToken = IERC20(_token);
-    }
-
-    function setDecimals(uint _decimals) external whiteListed whenNotStarted {
-        require(_decimals >=3 && _decimals <= 18, "!decimals");
-        decimals = _decimals;
     }
 
     function setTxFee(uint256 _fee) external whiteListed whenNotStarted {
@@ -415,4 +469,6 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
     function getTimestamp() external view returns (uint) {
         return block.timestamp;
     }
+
+    receive() external payable {}
 }
