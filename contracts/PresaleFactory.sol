@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >0.6.0;
 
-import "./Presale.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "./PresaleV2.sol";
 
 contract PresaleFactory is Ownable {
     struct PresaleInfo {
@@ -54,7 +55,7 @@ contract PresaleFactory is Ownable {
     ) external returns (address) {
         require(msg.sender == owner(), "!owner");
         
-        Presale presale = new Presale(
+        PresaleV2 presale = new PresaleV2(
             _wantToken,
             _investToken,
             _startTime,

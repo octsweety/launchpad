@@ -3,8 +3,8 @@ import { MocERC20 } from '../types/ethers-contracts/MocERC20';
 import { MocERC20__factory } from '../types/ethers-contracts/factories/MocERC20__factory';
 import { StakePool } from '../types/ethers-contracts/StakePool';
 import { StakePool__factory } from '../types/ethers-contracts/factories/StakePool__factory';
-import { Presale } from '../types/ethers-contracts/Presale';
-import { Presale__factory } from '../types/ethers-contracts/factories/Presale__factory';
+import { PresaleV2 } from '../types/ethers-contracts/PresaleV2';
+import { PresaleV2__factory } from '../types/ethers-contracts/factories/PresaleV2__factory';
 import address from '../address';
 
 require("dotenv").config();
@@ -57,36 +57,46 @@ async function deploy() {
     const routerAddress = mainnet ? address.mainnet.uniswapRouter : address.testnet.uniswapRouter;
     const curTime = Math.floor(Date.now() / 1000);
 
-    const presaleFactory: Presale__factory = new Presale__factory(deployer);
-    let bnbPresale: Presale = presaleFactory.attach(bnbPresaleAddress).connect(deployer);
+    const presaleFactory: PresaleV2__factory = new PresaleV2__factory(deployer);
+    let bnbPresaleV2: PresaleV2 = presaleFactory.attach(bnbPresaleAddress).connect(deployer);
     if ("redeploy" && true) {
-        bnbPresale = await presaleFactory.deploy(
+        bnbPresaleV2 = await presaleFactory.deploy(
             presaleTokenAddress,
             address.mainnet.bnb,
             curTime,                        // Just start
             600,                            // 10 mins duration
             parseEther('5000'),             // 5kBNB hardCap
             parseEther('3000'),             // 3k softCap
-            poolAddress
+            parseEther('0.001'),            // 0.1BNB listingPrice
+            5000,                           // 50% liquidity
+            lockerAddress,
+            300,                            // 5 mins locking
+            poolAddress,
+            deployer.address                // Keeper
         );
     }
-    console.log(`Deployed BNB Presale... (${bnbPresale.address})`);
-    // await bnbPresale.setUniswapRouter(routerAddress);
+    console.log(`Deployed BNB PresaleV2... (${bnbPresaleV2.address})`);
+    await bnbPresaleV2.setUniswapRouter(routerAddress);
 
-    let tokenPresale: Presale = presaleFactory.attach(tokenPresaleAddress).connect(deployer);
+    let tokenPresaleV2: PresaleV2 = presaleFactory.attach(tokenPresaleAddress).connect(deployer);
     if ("redeploy" && true) {
-        tokenPresale = await presaleFactory.deploy(
+        tokenPresaleV2 = await presaleFactory.deploy(
             presaleTokenAddress,
             address.testnet.investToken,
             curTime,                        // Just start
             600,                            // 10 mins duration
             parseEther('5000'),             // 5kBNB hardCap
             parseEther('3000'),             // 3k softCap
-            poolAddress
+            parseEther('0.01'),             // 0.1BNB listingPrice
+            5000,                           // 50% liquidity
+            lockerAddress,
+            300,                            // 5 mins locking
+            poolAddress,
+            deployer.address                // Keeper
         );
     }
-    console.log(`Deployed Token Presale... (${tokenPresale.address})`);
-    // await tokenPresale.setUniswapRouter(routerAddress);
+    console.log(`Deployed Token PresaleV2... (${tokenPresaleV2.address})`);
+    await tokenPresaleV2.setUniswapRouter(routerAddress);
 
     console.log(
         presaleTokenAddress,
@@ -95,7 +105,12 @@ async function deploy() {
         600,                            // 10 mins duration
         parseEther('5000').toString(),             // 5kBNB hardCap
         parseEther('3000').toString(),             // 3k softCap
-        poolAddress
+        parseEther('0.01').toString(),             // 0.1BNB listingPrice
+        5000,                           // 50% liquidity
+        lockerAddress,
+        300,                            // 5 mins locking
+        poolAddress,
+        deployer.address                // Keeper
     );
 
     const afterBalance = await deployer.getBalance();

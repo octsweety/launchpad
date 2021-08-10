@@ -22,8 +22,8 @@ export const address = {
         stakePool: "0xb985Aa21a4243586696f709a5c439C1444EFCFF4",
         locker: "0xCe6Bef445Aeae947D3c823ed8D004199491A8404",
         presales: {
-            bnbPresale: "0xB0707FCbf8D5e5b0fA890B31212d4D090ea9b029",
-            tokenPresale: "0x5Bb051fcE7273233882669184a1d26b08cF48678",
+            bnbPresale: "0xD8530a593f4F02bF1AB3FEF2585C1b184F854193",
+            tokenPresale: "0x452Ca08624AaA0Da65CC4e4eBB2B9600E4660aE1",
         }
     }
 }
