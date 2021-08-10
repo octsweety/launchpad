@@ -23,6 +23,11 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
 
+    struct LockedBalance {
+        uint256 amount;
+        uint256 unlockTime;
+    }
+
     struct Tier {
         uint supply;
         uint available;
@@ -64,6 +69,11 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
     address uniswapV2Pair;
     uint suppliedLP;
 
+    mapping(address => LockedBalance[]) locks;
+    uint public totalLocked;
+    uint public vestRate;
+    uint public vestDuration;
+
     modifier whenNotStarted {
         require(block.timestamp < startTime, "already started");
         _;
@@ -85,7 +95,7 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
     }
 
     modifier onlyKeeper {
-        require(msg.sender == owner() || whiteList[msg.sender] == true || msg.sender == keeper, "!keeper");
+        require(msg.sender == owner() || msg.sender == keeper, "!keeper");
         _;
     }
 
@@ -117,6 +127,29 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
 
         keeper = msg.sender;
         whiteList[msg.sender] = true;
+    }
+
+    function lockedOf(address _user)
+    view public returns (
+        uint256 total,
+        uint256 unlocked,
+        uint256 locked,
+        LockedBalance[] memory lockData
+    ) {
+        LockedBalance[] storage tokenLocks = locks[_user];
+        uint256 idx;
+        for (uint i = 0; i < tokenLocks.length; i++) {
+            if (tokenLocks[i].unlockTime > block.timestamp) {
+                if (idx == 0) {
+                    lockData = new LockedBalance[](tokenLocks.length - i);
+                }
+                lockData[idx] = tokenLocks[i];
+                locked = locked.add(tokenLocks[i].amount);
+            } else {
+                unlocked = unlocked.add(tokenLocks[i].amount);
+            }
+        }
+        return (unlocked+locked, unlocked, locked, lockData);
     }
 
     function getInvestorList() external view onlyKeeper returns (address[] memory) {
@@ -192,6 +225,11 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         uint amount = claimable(msg.sender);
         require(amount <= wantToken.balanceOf(address(this)), "exceeded amount to claim");
 
+        if (vestRate > 0) {
+            uint vestAmount = amount.mul(vestRate).div(100);
+            amount -= vestAmount;
+            _vest(vestAmount, msg.sender, vestDuration);
+        }
         wantToken.safeTransfer(msg.sender, amount);
         claimed[msg.sender] = block.timestamp;
     }
@@ -222,6 +260,22 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         }
     }
 
+    function unlock() external {
+        LockedBalance[] storage tokenLocks = locks[msg.sender];
+        (uint bal,,,) = lockedOf(msg.sender);
+        uint256 amount;
+        uint256 length = tokenLocks.length;
+        for (uint i = 0; i < length; i++) {
+            if (tokenLocks[i].unlockTime > block.timestamp) continue;
+            amount = amount.add(tokenLocks[i].amount);
+            delete tokenLocks[i];
+        }
+
+        totalLocked -= amount;
+        if (amount > 0) wantToken.safeTransfer(msg.sender, amount);
+        else require(false, "!unlocked");
+    }
+
     function _bulkTransferClaimable() internal {
         for (uint i = 0; i < investors.length(); i++) {
             address investor = investors.at(i);
@@ -230,9 +284,24 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
             uint amount = claimable(investor);
             require(amount <= wantToken.balanceOf(address(this)), "exceeded amount to claim");
 
+            if (vestRate > 0) {
+                uint vestAmount = amount.mul(vestRate).div(100);
+                amount -= vestAmount;
+                _vest(vestAmount, investor, vestDuration);
+            }
             wantToken.safeTransfer(investor, amount);
             claimed[investor] = block.timestamp;
         }
+    }
+
+    function _vest(uint _amount, address _keeper, uint _duration) internal {
+        LockedBalance[] storage tokenLocks = locks[_keeper];
+        uint256 unlockTime = block.timestamp.add(_duration);
+        tokenLocks.push(LockedBalance({
+            amount: _amount,
+            unlockTime: unlockTime
+        }));
+        totalLocked += _amount;
     }
 
     function updateTiers() external whiteListed whenNotStarted {
@@ -247,12 +316,15 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
         }
     }
 
-    function setEnableClaim(bool _flag, bool _isBulk) external whiteListed whenFinished {
+    function setEnableClaim(bool _flag, bool _isBulk, uint _vestRate, uint _vestDuration) external whiteListed whenFinished {
         enabledClaim = _flag;
 
         if (_flag == true && _isBulk == true) {
             _bulkTransferClaimable();
         }
+
+        vestRate = _vestRate;
+        vestDuration = _vestDuration;
     }
 
     function setHardCap(uint _cap) external whiteListed whenNotFinished {
@@ -272,6 +344,10 @@ contract Presale is ReentrancyGuard, Ownable, Pausable {
 
     function setStakePool(address _pool) external onlyOwner {
         stakePool = IStakePool(_pool);
+    }
+
+    function setWhiteList(address _user, bool _flag) external onlyOwner {
+        whiteList[_user] = _flag;
     }
 
     receive() external payable {}

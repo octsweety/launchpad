@@ -59,7 +59,7 @@ async function deploy() {
 
     const presaleFactory: Presale__factory = new Presale__factory(deployer);
     let bnbPresale: Presale = presaleFactory.attach(bnbPresaleAddress).connect(deployer);
-    if ("redeploy" && true) {
+    if ("redeploy" && false) {
         bnbPresale = await presaleFactory.deploy(
             presaleTokenAddress,
             address.mainnet.bnb,
