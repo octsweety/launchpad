@@ -23,7 +23,7 @@ export const address = {
         locker: "0xCe6Bef445Aeae947D3c823ed8D004199491A8404",
         presales: {
             bnbPresale: "0xD8530a593f4F02bF1AB3FEF2585C1b184F854193",
-            tokenPresale: "0x452Ca08624AaA0Da65CC4e4eBB2B9600E4660aE1",
+            tokenPresale: "0xe8E76E6A62AE025214903cfF5007939dcA1E4d95",
         }
     }
 }
